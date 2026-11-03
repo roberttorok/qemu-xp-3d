@@ -1,0 +1,278 @@
+diff -ruN a/hw/misc/ivshmem-win.c b/hw/misc/ivshmem-win.c
+--- a/hw/misc/ivshmem-win.c
++++ b/hw/misc/ivshmem-win.c
+@@ -0,0 +1,171 @@
++/*
++ * ivshmem-win: an ivshmem-plain compatible PCI device for Windows hosts.
++ *
++ * Upstream ivshmem depends on POSIX shared memory and memory-backend-file,
++ * neither of which exists in QEMU's Windows build. This device presents the
++ * same guest-visible hardware (1af4:1110, register BAR0, 64-bit prefetchable
++ * memory BAR2, no MSI) backed by a named Win32 file mapping, so a host process
++ * can share memory with the guest. There is no doorbell: registers read as 0.
++ *
++ * -device ivshmem-win,name=Local\sharedgl_shared_memory,size=64M
++ *
++ * This work is licensed under the terms of the GNU GPL, version 2 or later.
++ */
++
++#include "qemu/osdep.h"
++#include "qemu/units.h"
++#include "qapi/error.h"
++#include "hw/pci/pci.h"
++#include "hw/pci/pci_device.h"
++#include "hw/core/qdev-properties.h"
++#include "migration/blocker.h"
++#include "qemu/module.h"
++#include "qom/object.h"
++#include "system/memory.h"
++
++#define TYPE_IVSHMEM_WIN "ivshmem-win"
++OBJECT_DECLARE_SIMPLE_TYPE(IvshmemWinState, IVSHMEM_WIN)
++
++#define IVSHMEM_WIN_REG_SIZE 0x100
++
++struct IvshmemWinState {
++    PCIDevice parent_obj;
++
++    char *name;
++    uint64_t size;
++
++    HANDLE mapping;
++    void *view;
++    MemoryRegion regs;
++    MemoryRegion shm;
++    Error *migration_blocker;
++};
++
++static uint64_t ivshmem_win_reg_read(void *opaque, hwaddr addr, unsigned size)
++{
++    return 0;
++}
++
++static void ivshmem_win_reg_write(void *opaque, hwaddr addr, uint64_t val,
++                                  unsigned size)
++{
++}
++
++static const MemoryRegionOps ivshmem_win_reg_ops = {
++    .read = ivshmem_win_reg_read,
++    .write = ivshmem_win_reg_write,
++    .endianness = DEVICE_LITTLE_ENDIAN,
++    .impl = {
++        .min_access_size = 4,
++        .max_access_size = 4,
++    },
++};
++
++static void ivshmem_win_realize(PCIDevice *dev, Error **errp)
++{
++    IvshmemWinState *s = IVSHMEM_WIN(dev);
++
++    if (!s->name || !s->name[0]) {
++        error_setg(errp, "ivshmem-win: 'name' is required");
++        return;
++    }
++    if (s->size == 0 || (s->size & (s->size - 1))) {
++        error_setg(errp, "ivshmem-win: 'size' must be a power of two");
++        return;
++    }
++
++    /* Opens the mapping if the host process made it first, or else creates it. */
++    s->mapping = CreateFileMappingA(INVALID_HANDLE_VALUE, NULL,
++                                    PAGE_READWRITE | SEC_COMMIT,
++                                    (DWORD)(s->size >> 32), (DWORD)s->size,
++                                    s->name);
++    if (!s->mapping) {
++        error_setg_win32(errp, GetLastError(),
++                         "ivshmem-win: cannot create mapping '%s'", s->name);
++        return;
++    }
++
++    /* A mapping that already exists keeps its size, so check that it fits. */
++    s->view = MapViewOfFile(s->mapping, FILE_MAP_ALL_ACCESS, 0, 0, s->size);
++    if (!s->view) {
++        error_setg_win32(errp, GetLastError(),
++                         "ivshmem-win: cannot map %" PRIu64 " bytes of '%s'",
++                         s->size, s->name);
++        CloseHandle(s->mapping);
++        s->mapping = NULL;
++        return;
++    }
++
++    dev->config[PCI_COMMAND] = PCI_COMMAND_IO | PCI_COMMAND_MEMORY;
++    dev->config[PCI_INTERRUPT_PIN] = 1;
++
++    memory_region_init_io(&s->regs, OBJECT(s), &ivshmem_win_reg_ops, s,
++                          "ivshmem-win.regs", IVSHMEM_WIN_REG_SIZE);
++    pci_register_bar(dev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &s->regs);
++
++    memory_region_init_ram_ptr(&s->shm, OBJECT(s), "ivshmem-win.shm",
++                               s->size, s->view);
++    pci_register_bar(dev, 2,
++                     PCI_BASE_ADDRESS_SPACE_MEMORY |
++                     PCI_BASE_ADDRESS_MEM_PREFETCH |
++                     PCI_BASE_ADDRESS_MEM_TYPE_64,
++                     &s->shm);
++
++    error_setg(&s->migration_blocker,
++               "ivshmem-win shares memory with a host process");
++    if (migrate_add_blocker(&s->migration_blocker, errp) < 0) {
++        return;
++    }
++}
++
++static void ivshmem_win_exit(PCIDevice *dev)
++{
++    IvshmemWinState *s = IVSHMEM_WIN(dev);
++
++    migrate_del_blocker(&s->migration_blocker);
++    if (s->view) {
++        UnmapViewOfFile(s->view);
++    }
++    if (s->mapping) {
++        CloseHandle(s->mapping);
++    }
++}
++
++static const Property ivshmem_win_properties[] = {
++    DEFINE_PROP_STRING("name", IvshmemWinState, name),
++    DEFINE_PROP_SIZE("size", IvshmemWinState, size, 64 * MiB),
++};
++
++static void ivshmem_win_class_init(ObjectClass *klass, const void *data)
++{
++    DeviceClass *dc = DEVICE_CLASS(klass);
++    PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
++
++    k->realize = ivshmem_win_realize;
++    k->exit = ivshmem_win_exit;
++    k->vendor_id = PCI_VENDOR_ID_REDHAT_QUMRANET;
++    k->device_id = 0x1110;
++    k->class_id = PCI_CLASS_MEMORY_RAM;
++    k->revision = 1;
++    device_class_set_props(dc, ivshmem_win_properties);
++    dc->desc = "Inter-VM shared memory over a Win32 file mapping";
++    set_bit(DEVICE_CATEGORY_MISC, dc->categories);
++}
++
++static const TypeInfo ivshmem_win_info = {
++    .name = TYPE_IVSHMEM_WIN,
++    .parent = TYPE_PCI_DEVICE,
++    .instance_size = sizeof(IvshmemWinState),
++    .class_init = ivshmem_win_class_init,
++    .interfaces = (const InterfaceInfo[]) {
++        { INTERFACE_CONVENTIONAL_PCI_DEVICE },
++        { },
++    },
++};
++
++static void ivshmem_win_register_types(void)
++{
++    type_register_static(&ivshmem_win_info);
++}
++
++type_init(ivshmem_win_register_types)
+diff -ruN a/hw/misc/meson.build b/hw/misc/meson.build
+--- a/hw/misc/meson.build
++++ b/hw/misc/meson.build
+@@ -166,3 +166,7 @@
+ 
+ # HPPA devices
+ system_ss.add(when: 'CONFIG_LASI', if_true: files('lasi.c'))
++
++if host_os == 'windows'
++  system_ss.add(when: 'CONFIG_PCI', if_true: files('ivshmem-win.c'))
++endif
+diff -ruN a/hw/rtc/mc146818rtc.c b/hw/rtc/mc146818rtc.c
+--- a/hw/rtc/mc146818rtc.c
++++ b/hw/rtc/mc146818rtc.c
+@@ -44,6 +44,7 @@
+ #include "qapi/qapi-events-misc.h"
+ #include "qapi/visitor.h"
+ #include "trace.h"
++#include "system/whpx.h"
+ 
+ //#define DEBUG_COALESCED
+ 
+@@ -103,10 +104,19 @@
+     rtc->irq_coalesced = 0;
+ }
+ 
+-static bool rtc_policy_slew_deliver_irq(MC146818RtcState *s)
++/*
++ * With WHPX's in-hypervisor APIC, QEMU's APIC never reports a delivery, so every
++ * tick would look lost and be injected again without end: XP's clock ran 16x fast.
++ * There, go by what the guest did: a tick is missed if it has not yet acknowledged
++ * the one before, which it does by reading register C.
++ */
++static bool rtc_policy_slew_deliver_irq(MC146818RtcState *s, bool unacked)
+ {
+     kvm_reset_irq_delivered();
+     qemu_irq_raise(s->irq);
++    if (whpx_irqchip_in_kernel()) {
++        return !unacked;
++    }
+     return kvm_get_irq_delivered();
+ }
+ 
+@@ -115,9 +125,11 @@
+     MC146818RtcState *s = opaque;
+ 
+     if (s->irq_coalesced != 0) {
++        bool unacked = s->cmos_data[RTC_REG_C] & REG_C_PF;
++
+         s->cmos_data[RTC_REG_C] |= 0xc0;
+         DPRINTF_C("cmos: injecting from timer\n");
+-        if (rtc_policy_slew_deliver_irq(s)) {
++        if (rtc_policy_slew_deliver_irq(s, unacked)) {
+             s->irq_coalesced--;
+             DPRINTF_C("cmos: coalesced irqs decreased to %d\n",
+                       s->irq_coalesced);
+@@ -222,6 +234,7 @@
+ static void rtc_periodic_timer(void *opaque)
+ {
+     MC146818RtcState *s = opaque;
++    bool unacked = s->cmos_data[RTC_REG_C] & REG_C_PF;
+ 
+     periodic_timer_update(s, s->next_periodic_time, s->period, false);
+     s->cmos_data[RTC_REG_C] |= REG_C_PF;
+@@ -230,7 +243,7 @@
+         if (s->lost_tick_policy == LOST_TICK_POLICY_SLEW) {
+             if (s->irq_reinject_on_ack_count >= RTC_REINJECT_ON_ACK_COUNT)
+                 s->irq_reinject_on_ack_count = 0;
+-            if (!rtc_policy_slew_deliver_irq(s)) {
++            if (!rtc_policy_slew_deliver_irq(s, unacked)) {
+                 s->irq_coalesced++;
+                 rtc_coalesced_timer_update(s);
+                 DPRINTF_C("cmos: coalesced irqs increased to %d\n",
+@@ -708,7 +721,7 @@
+                 s->irq_reinject_on_ack_count++;
+                 s->cmos_data[RTC_REG_C] |= REG_C_IRQF | REG_C_PF;
+                 DPRINTF_C("cmos: injecting on ack\n");
+-                if (rtc_policy_slew_deliver_irq(s)) {
++                if (rtc_policy_slew_deliver_irq(s, false)) {
+                     s->irq_coalesced--;
+                     DPRINTF_C("cmos: coalesced irqs decreased to %d\n",
+                               s->irq_coalesced);
+diff -ruN a/ui/sdl2.c b/ui/sdl2.c
+--- a/ui/sdl2.c
++++ b/ui/sdl2.c
+@@ -632,7 +632,7 @@
+         }
+         break;
+     case SDL_WINDOWEVENT_RESTORED:
+-        update_displaychangelistener(&scon->dcl, GUI_REFRESH_INTERVAL_DEFAULT);
++        update_displaychangelistener(&scon->dcl, SDL2_REFRESH_INTERVAL_BUSY);
+         break;
+     case SDL_WINDOWEVENT_MINIMIZED:
+         update_displaychangelistener(&scon->dcl, 500);
+@@ -719,7 +719,7 @@
+         if (scon->idle_counter < SDL2_MAX_IDLE_COUNT) {
+             scon->idle_counter++;
+             if (scon->idle_counter >= SDL2_MAX_IDLE_COUNT) {
+-                scon->dcl.update_interval = GUI_REFRESH_INTERVAL_DEFAULT;
++                scon->dcl.update_interval = SDL2_REFRESH_INTERVAL_BUSY;
+             }
+         }
+     } else {

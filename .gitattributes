@@ -1,0 +1,7 @@
+# XP needs Windows line endings in these files.
+*.BAT  -text
+*.REG  -text
+*.ini  -text
+*.sh   text eol=lf
+Makefile text eol=lf
+*.patch -text

@@ -1,0 +1,6 @@
+REGEDIT4
+
+; Reports DirectX 8.1. Some programs refuse to start with the version XP SP3 reports.
+[HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\DirectX]
+"Version"="4.08.01.0881"
+

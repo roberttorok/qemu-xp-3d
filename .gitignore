@@ -1,0 +1,19 @@
+# Downloaded and cloned sources
+/sharedgl/
+/qemu-11.0.1/
+/qemu-11.0.1.tar.xz
+/wine9x-*.zip
+/cnc-ddraw-*.zip
+/cnc-ddraw-LICENSE
+/qxl_xp_x86.zip
+
+# Build output
+/build-xp/
+/guest/cd/
+/guest.iso
+/server.log
+
+# VM disks and CD images
+*.qcow2
+*.iso
+*.ISO
