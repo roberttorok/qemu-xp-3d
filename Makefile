@@ -71,7 +71,7 @@ $(QEMU_BUILD)/build.ninja:
 
 # ---- The server, for the host ----
 
-SERVER_SRC := $(addprefix $(SGL)/src/server/,context.c dynarr.c main.c overlay.c processor.c sgldebug.c) $(SGL)/src/client/scratch.c
+SERVER_SRC := $(addprefix $(SGL)/src/server/,context.c dynarr.c frameprof.c main.c overlay.c processor.c sgldebug.c) $(SGL)/src/client/scratch.c
 
 ifeq ($(OS),Windows_NT)
 server: check-sharedgl $(SGL)/build-win/sglrenderer.exe
@@ -89,7 +89,7 @@ endif
 # ---- opengl32.dll, for XP ----
 
 CLIENT_OBJ := $(addprefix $(OBJ)/,winmain.o pb.o spinlock.o glimpl.o scratch.o windrv.o)
-CLIENT_DEP := $(wildcard $(SGL)/inc/client/*.h) $(SGL)/src/client/platform/xpwgl.inl
+CLIENT_DEP := $(wildcard $(SGL)/inc/client/*.h) $(SGL)/inc/sglprof.h $(SGL)/src/client/platform/xpwgl.inl
 
 opengl32: check-sharedgl $(CD)/opengl32.dll
 

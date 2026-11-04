@@ -152,6 +152,8 @@ The script starts the SharedGL server, then the VM, and stops the server when yo
 
 In XP, `D:` is that CD and `E:` is the helper CD. The VM boots from the disk, or from the CD if the disk is still empty.
 
+Games are locked to 60 fps. Add `fps_cap=N` after the disk and CD to change it, or `fps_cap=0` for unlimited. See **Frame rate limit** below.
+
 You can change `RAM` and `CPUS` at the top of the script. **Keep everything else exactly as it is.** It was tuned for XP on this setup, and changing it can cost a lot of speed or stop XP finding its drivers:
 
 - **`kernel-irqchip=off`:** QEMU only patches XP's slow interrupt-priority (TPR) accesses with its own APIC. In a demanding game this took about 35 FPS to about 56-60.
@@ -239,6 +241,8 @@ The script starts the SharedGL server, then the VM, and stops the server when yo
 
 In XP, `D:` is that CD and `E:` is the helper CD. The VM boots from the disk, or from the CD if the disk is still empty.
 
+Games are locked to 60 fps. Add `fps_cap=N` after the disk and CD to change it, or `fps_cap=0` for unlimited. See **Frame rate limit** below.
+
 You can change `RAM` and `CPUS` at the top of the script. **Keep everything else exactly as it is**, for the reasons given in the Windows section's **Start the VM** step. The APIC setting and `SDL_RENDER_VSYNC` apply only to Windows.
 
 ## Inside XP
@@ -285,6 +289,21 @@ If a 16-bit DirectDraw game shows wrong colors, run this as well. It replaces `d
 ```bat
 copy /y E:\DDRAW\*.* "C:\Program Files\My Game"
 ```
+
+### Frame rate limit
+
+**Games are locked to 60 fps by default.** Frames beyond the screen's refresh rate are never seen, but each one costs host CPU. The lock also makes motion smoother.
+
+The limit is set when you start the VM, never inside XP or by the game. **For unlimited fps**, add `fps_cap=0`:
+
+```bash
+./linux/run-xp.sh winxp.qcow2 fps_cap=0
+./windows/run-xp.sh winxp.qcow2 fps_cap=0
+```
+
+Any other number sets that limit, such as `fps_cap=144` for a 144 Hz monitor or `fps_cap=30` to save more CPU.
+
+The cached display memory needs the current `sgldrv.sys` in XP: after updating from an older build, run `E:\sglinstall.exe` again.
 
 ## Credits
 

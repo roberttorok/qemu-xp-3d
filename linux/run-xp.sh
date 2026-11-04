@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Starts the SharedGL server and the XP VM, and stops the server when XP shuts down.
 #
-#   ./linux/run-xp.sh DISK.qcow2 [CD.iso]
+#   ./linux/run-xp.sh DISK.qcow2 [CD.iso] [fps_cap=N]
 #
 # In XP, D: is the CD you pass here (XP setup or a game), and E: is the helper CD.
 # The VM boots from the disk, or from the CD if the disk is still empty.
+#
+# fps_cap=N sets the frame limit for 3D games (default 60, 0 = unlimited). It is decided
+# here on the host; nothing inside XP or the game can change it. Frames above the
+# screen's refresh are never seen but cost host CPU.
 
 # You can change these two.
 RAM=2G
@@ -19,7 +23,20 @@ CPUS=2
 #   ram_size_mb=256       QXL working memory. Each frame is copied in, and QEMU frees it in batches of 32; the default 64 MB ran out every ~16 frames and stalled XP: visible micro-stutter
 # QEMU_EXTRA in the environment adds more QEMU arguments, such as -snapshot.
 
-[ -n "$1" ] || { echo "Usage: $0 DISK.qcow2 [CD.iso]"; exit 1; }
+# Settings come after the disk and CD, as name=value.
+FPS_CAP=60
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    fps_cap=*)   FPS_CAP=${arg#fps_cap=} ;;
+    *=*)         [ -f "$arg" ] && ARGS+=("$arg") || { echo "Unknown setting: $arg"; exit 1; } ;;
+    *)           ARGS+=("$arg") ;;
+  esac
+done
+set -- "${ARGS[@]}"
+[[ "$FPS_CAP" =~ ^[0-9]+$ ]] && [ "$FPS_CAP" -le 1000 ] || { echo "fps_cap takes a number from 0 (no limit) to 1000"; exit 1; }
+
+[ -n "$1" ] || { echo "Usage: $0 DISK.qcow2 [CD.iso] [fps_cap=N]"; exit 1; }
 [ -f "$1" ] || { echo "No disk at $1"; exit 1; }
 [ -z "$2" ] || [ -f "$2" ] || { echo "No CD image at $2"; exit 1; }
 
@@ -30,7 +47,7 @@ CD=""
 [ -z "$2" ] || CD=",format=raw,file=$(qemu_path "$2")"
 cd "$(dirname "$0")/.." || exit 1
 
-./sharedgl/build-host/sglrenderer -m 64 > server.log 2>&1 &
+./sharedgl/build-host/sglrenderer -m 64 -f "$FPS_CAP" > server.log 2>&1 &
 SERVER=$!
 trap 'kill $SERVER 2> /dev/null' EXIT
 sleep 1

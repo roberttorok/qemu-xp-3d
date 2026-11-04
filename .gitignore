@@ -17,3 +17,12 @@
 *.qcow2
 *.iso
 *.ISO
+
+# Profiling notes, tools and results: kept locally, not published
+/PROFILING.md
+/prof/
+
+# The server's frame rate file on Windows hosts
+/sgl_fps
+
+CPU-USAGE.md
