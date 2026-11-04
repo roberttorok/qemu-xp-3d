@@ -42,7 +42,7 @@ Keep this folder on a short path: QEMU's configure step failed from one about 10
 
 Turn on **Windows Hypervisor Platform** in Windows features and reboot, then install [MSYS2](https://www.msys2.org/).
 
-Run everything below in the **UCRT64** terminal, from this folder. QEMU builds there, because MINGW64 no longer has the packages it needs. `make` builds the SharedGL server with MINGW64's compiler and libraries instead, because it runs about 20% faster that way.
+Run everything below in the **UCRT64** terminal, from this folder. QEMU and the SharedGL server both build there.
 
 ```bash
 pacman -S --needed git make patch diffutils unzip xorriso \
@@ -158,6 +158,7 @@ You can change `RAM` and `CPUS` at the top of the script. **Keep everything else
 
 - **`kernel-irqchip=off`:** QEMU only patches XP's slow interrupt-priority (TPR) accesses with its own APIC. In a demanding game this took about 35 FPS to about 56-60.
 - **`SDL_RENDER_VSYNC=0`:** waiting for vsync holds QEMU's global lock and stalls XP.
+- **`-display sdl,gl=on`:** QEMU draws the screen with OpenGL itself, and SDL only provides the window. Motion in games looked closest to Linux's `gtk,gl=on` this way. SDL's own OpenGL renderer (`SDL_RENDER_DRIVER=opengl`) and GTK with `gl=on` crash QEMU on Windows.
 - **Device order:** it sets the PCI slots. If `ivshmem-win` moves ahead of `qxl-vga`, XP's display and 3D drivers no longer find their cards.
 - **`-cpu Opteron_G3`:** the XP files are compiled for this CPU's instruction set.
 - **`-m 64` and `size=64M`:** the server's shared memory and the card's must match.

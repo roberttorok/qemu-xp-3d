@@ -17,6 +17,7 @@ CPUS=2
 # Keep everything below as it is. In particular:
 #   kernel-irqchip=off    QEMU only patches XP's slow interrupt-priority accesses with its own APIC
 #   SDL_RENDER_VSYNC=0    waiting for vsync stalls XP
+#   -display sdl,gl=on    QEMU draws the screen with OpenGL itself; motion looks closest to Linux's gtk,gl=on
 #   device order          it sets the PCI slots, and XP's drivers look for their cards there
 #   -cpu Opteron_G3       the XP files are compiled for this CPU
 #   -machine pc, IDE, AC97, USB    XP has built-in drivers for these
@@ -49,8 +50,8 @@ CD=""
 [ -z "$2" ] || CD=",format=raw,file=$(qemu_path "$2")"
 cd "$(dirname "$0")/.." || exit 1
 
-# The server is a MINGW64 build, so it needs that environment's DLLs. See the Makefile.
-PATH=/mingw64/bin:/usr/bin ./sharedgl/build-win/sglrenderer.exe -m 64 -f "$FPS_CAP" > server.log 2>&1 &
+# The server is a UCRT64 build, so it needs that environment's DLLs. See the Makefile.
+PATH=/ucrt64/bin:/usr/bin ./sharedgl/build-win/sglrenderer.exe -m 64 -f "$FPS_CAP" > server.log 2>&1 &
 trap 'taskkill //f //im sglrenderer.exe > /dev/null 2>&1' EXIT
 sleep 1
 
@@ -63,6 +64,6 @@ SDL_RENDER_SCALE_QUALITY=linear SDL_RENDER_VSYNC=0 MSYS2_ARG_CONV_EXCL='*' qemu-
   -drive if=none,id=helper,media=cdrom,readonly=on,format=raw,file=guest.iso -device ide-cd,bus=ide.1,unit=1,drive=helper \
   -device qxl-vga,vgamem_mb=32,ram_size_mb=256 \
   -device 'ivshmem-win,name=Local\sharedgl_shared_memory,size=64M' \
-  -display sdl \
+  -display sdl,gl=on \
   -audiodev sdl,id=snd,in.voices=0 -device AC97,audiodev=snd \
   -device usb-tablet -nic none ${QEMU_EXTRA:-}

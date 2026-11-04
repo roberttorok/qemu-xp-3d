@@ -77,8 +77,8 @@ ifeq ($(OS),Windows_NT)
 server: check-sharedgl $(SGL)/build-win/sglrenderer.exe
 $(SGL)/build-win/sglrenderer.exe: $(SERVER_SRC)
 	mkdir -p $(@D)
-	# MINGW64's compiler and libraries on purpose: 3DMark scored about 20% higher than with UCRT64's. The cause is unknown.
-	PATH=/mingw64/bin:/usr/bin gcc -O2 -std=gnu17 -w -DSDL_MAIN_HANDLED -I$(SGL)/inc $(SERVER_SRC) -o $@ -lSDL2 -lepoxy -lws2_32 -lwinmm -liphlpapi
+	# UCRT64, like everything else on Windows.
+	PATH=/ucrt64/bin:/usr/bin gcc -O2 -std=gnu17 -w -DSDL_MAIN_HANDLED -I$(SGL)/inc $(SERVER_SRC) -o $@ -lSDL2 -lepoxy -lws2_32 -lwinmm -liphlpapi
 else
 server: check-sharedgl
 	cmake -S $(SGL) -B $(SGL)/build-host -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-Wno-incompatible-pointer-types -Wno-int-conversion -Wno-implicit-function-declaration"
