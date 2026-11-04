@@ -7,7 +7,7 @@
 #   make opengl32   the replacement opengl32.dll for XP
 #   make driver     the XP kernel driver and its installer
 #   make programs   small test programs for XP
-#   make wine9x     unpacks the prebuilt Direct3D DLLs
+#   make wine9x     compiles the patched Direct3D and DirectDraw DLLs
 #   make cnc-ddraw  unpacks the prebuilt DirectDraw DLL
 #   make qxl        unpacks the prebuilt QXL display driver
 #   make cd         adds the helper .BAT files and puts all the XP files on a CD image, guest.iso
@@ -36,7 +36,7 @@ endif
 # k8-sse3 matches the VM's virtual CPU. 0x0501 means "target Windows XP".
 XPFLAGS := $(HOST32) -march=k8-sse3 -mtune=generic -mfpmath=sse -mstackrealign -O2 -s -D_WIN32_WINNT=0x0501 -DWINVER=0x0501
 
-.PHONY: all qemu server opengl32 driver programs wine9x cnc-ddraw qxl cd check-qemu check-sharedgl
+.PHONY: all qemu server opengl32 driver programs wine9x cnc-ddraw qxl cd check-qemu check-sharedgl check-wine9x
 
 ifeq ($(OS),Windows_NT)
 all: qemu server cd
@@ -54,6 +54,11 @@ check-qemu:
 check-sharedgl:
 	@test -d $(SGL)/src || { echo "SharedGL's source is missing. Do the clone step for SharedGL in README.md."; exit 1; }
 	@test -f $(XPK)/sgldrv.c || { echo "This isn't the windows-support branch of SharedGL. Do the clone step for SharedGL in README.md."; exit 1; }
+
+check-wine9x:
+	@test -f $(W9X)/config.mk-sample || { echo "wine9x's source is missing. Do the clone step for wine9x in README.md."; exit 1; }
+	@test -f $(W9X)/pthread9x/Makefile -a -f $(W9X)/nocrt/nocrt.c || { echo "wine9x's submodules are missing. Do the clone step for wine9x in README.md."; exit 1; }
+	@grep -q ddraw_surface_copy_from $(W9X)/ddraw/surface.c || { echo "wine9x isn't patched. Do the patch step for wine9x in README.md."; exit 1; }
 
 
 # ---- QEMU, for a Windows host ----
@@ -146,19 +151,38 @@ programs:
 	$(CC32) $(XPFLAGS) -DCOBJMACROS -DUSE_D3D8 -o $(CD)/DX/cube8.exe guest/cube.c -ld3d8 -lgdi32 -luser32 -lm -static-libgcc
 
 
-# ---- Prebuilt third-party DLLs, for XP ----
+# ---- wine9x: Direct3D 8 and 9 and DirectDraw through OpenGL, for XP ----
 
-WINE9X := wine9x-1.7.55.45-sse3.zip
-DDRAW  := cnc-ddraw-v7.1.0.0.zip
+# Compiled from source with our patch (patches/wine9x/wine9x-all.patch). All four DLLs come from
+# one build: the patched DirectDraw DLL crashed with the release's prebuilt wined3d.dll.
+# wine9x's own Makefile takes its tools from config.mk, made from its sample, which names
+# Linux's 32-bit MinGW. On Windows, MSYS2's 32-bit MinGW calls them plain gcc, ar and windres.
+W9X := wine9x
+W9X_DLLS := wined3d.dll winedd.dll wined8.dll wined9.dll
 
-wine9x:
-	@test -f $(WINE9X) || { echo "$(WINE9X) is missing. Do the download step for wine9x in README.md."; exit 1; }
+ifeq ($(OS),Windows_NT)
+  W9X_MAKE := PATH=/mingw32/bin:/usr/bin $(MAKE) CC=gcc LD=gcc AR=ar WINDRES=windres ASM=nasm
+  STRIP32  := PATH=/mingw32/bin:/usr/bin strip
+else
+  W9X_MAKE := $(MAKE)
+  STRIP32  := i686-w64-mingw32-strip
+endif
+
+wine9x: check-wine9x
+	test -f $(W9X)/config.mk || cp $(W9X)/config.mk-sample $(W9X)/config.mk
+	$(W9X_MAKE) -C $(W9X) $(W9X_DLLS)
 	mkdir -p $(CD)/DX
 	# wine9x names its DLLs wined8, wined9 and winedd. Games look for the Microsoft names.
-	unzip -q -o -j $(WINE9X) wined3d.dll license.txt -d $(CD)/DX
-	unzip -p $(WINE9X) wined8.dll > $(CD)/DX/d3d8.dll
-	unzip -p $(WINE9X) wined9.dll > $(CD)/DX/d3d9.dll
-	unzip -p $(WINE9X) winedd.dll > $(CD)/DX/ddraw.dll
+	$(STRIP32) -o $(CD)/DX/wined3d.dll $(W9X)/wined3d.dll
+	$(STRIP32) -o $(CD)/DX/d3d8.dll $(W9X)/wined8.dll
+	$(STRIP32) -o $(CD)/DX/d3d9.dll $(W9X)/wined9.dll
+	$(STRIP32) -o $(CD)/DX/ddraw.dll $(W9X)/winedd.dll
+	cp $(W9X)/LICENSE $(CD)/DX/license.txt
+
+
+# ---- Prebuilt third-party DLLs, for XP ----
+
+DDRAW  := cnc-ddraw-v7.1.0.0.zip
 
 cnc-ddraw:
 	@test -f $(DDRAW) || { echo "$(DDRAW) is missing. Do the download step for cnc-ddraw in README.md."; exit 1; }

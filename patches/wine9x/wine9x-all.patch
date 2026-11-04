@@ -1,0 +1,98 @@
+diff --git a/ddraw/surface.c b/ddraw/surface.c
+index 22c0467..3fa19f8 100644
+--- a/ddraw/surface.c
++++ b/ddraw/surface.c
+@@ -4423,6 +4423,59 @@ static HRESULT WINAPI ddraw_surface1_SetClipper(IDirectDrawSurface *iface, IDire
+  *  DDERR_INVALIDPARAMS if DDSD is NULL
+  *
+  *****************************************************************************/
++/* Copies application memory laid out like the surface (its own pitch, or packed
++ * blocks for DXTn) into the surface. For SetSurfaceDesc, see there. */
++static BOOL ddraw_surface_copy_from(struct ddraw_surface *surface, const void *mem)
++{
++    const DDSURFACEDESC2 *desc = &surface->surface_desc;
++    const DDPIXELFORMAT *pf = &desc->u4.ddpfPixelFormat;
++    struct wined3d_map_desc map_desc;
++    const BYTE *src = mem;
++    BYTE *dst;
++    UINT rows, row_bytes, src_pitch, i;
++
++    if (pf->dwFlags & DDPF_FOURCC)
++    {
++        UINT block;
++
++        if (pf->dwFourCC == MAKEFOURCC('D','X','T','1'))
++            block = 8;
++        else if (pf->dwFourCC == MAKEFOURCC('D','X','T','2') || pf->dwFourCC == MAKEFOURCC('D','X','T','3')
++                || pf->dwFourCC == MAKEFOURCC('D','X','T','4') || pf->dwFourCC == MAKEFOURCC('D','X','T','5'))
++            block = 16;
++        else
++            return FALSE;
++        rows = (desc->dwHeight + 3) / 4;
++        row_bytes = ((desc->dwWidth + 3) / 4) * block;
++        src_pitch = row_bytes;
++    }
++    else
++    {
++        UINT bits = pf->u1.dwRGBBitCount;
++
++        if (!bits || bits % 8)
++            return FALSE;
++        rows = desc->dwHeight;
++        row_bytes = desc->dwWidth * (bits / 8);
++        src_pitch = desc->u1.lPitch;
++        if (src_pitch < row_bytes)
++            return FALSE;
++    }
++
++    if (FAILED(wined3d_surface_map(surface->wined3d_surface, &map_desc, NULL, 0)))
++        return FALSE;
++    if (map_desc.row_pitch < row_bytes)
++    {
++        wined3d_surface_unmap(surface->wined3d_surface);
++        return FALSE;
++    }
++    dst = map_desc.data;
++    for (i = 0; i < rows; ++i)
++        memcpy(dst + i * map_desc.row_pitch, src + i * src_pitch, row_bytes);
++    wined3d_surface_unmap(surface->wined3d_surface);
++    return TRUE;
++}
++
+ static HRESULT WINAPI ddraw_surface7_SetSurfaceDesc(IDirectDrawSurface7 *iface, DDSURFACEDESC2 *DDSD, DWORD Flags)
+ {
+     struct ddraw_surface *This = impl_from_IDirectDrawSurface7(iface);
+@@ -4537,9 +4590,33 @@ static HRESULT WINAPI ddraw_surface7_SetSurfaceDesc(IDirectDrawSurface7 *iface,
+         format_id = wined3dformat_from_ddrawformat(&This->surface_desc.u4.ddpfPixelFormat);
+     }
+ 
++    /* Only the root of a mipmap chain has a wined3d texture; the sub-levels are
++     * its surfaces. Those can only take a copy of the memory, see below. */
++    if (!This->wined3d_texture)
++    {
++        if (!(DDSD->dwFlags & ~DDSD_LPSURFACE) && ddraw_surface_copy_from(This, DDSD->lpSurface))
++        {
++            wined3d_mutex_unlock();
++            return DD_OK;
++        }
++        WARN("Cannot change a mipmap sub-level, returning DDERR_INVALIDPARAMS.\n");
++        wined3d_mutex_unlock();
++        return DDERR_INVALIDPARAMS;
++    }
++
+     if (FAILED(hr = wined3d_texture_update_desc(This->wined3d_texture, width, height,
+             format_id, WINED3D_MULTISAMPLE_NONE, 0, DDSD->lpSurface, pitch)))
+     {
++        /* wined3d cannot point one level of a mipmapped texture at user memory.
++         * Windows can, and games use it to fill a system memory surface from their
++         * own buffer just before a Blt (NBA Live 2001 does so for every DXT texture).
++         * When nothing but the memory changes, copy the pixels in instead: the
++         * surface then holds what the application's memory holds. */
++        if (!(DDSD->dwFlags & ~DDSD_LPSURFACE) && ddraw_surface_copy_from(This, DDSD->lpSurface))
++        {
++            wined3d_mutex_unlock();
++            return DD_OK;
++        }
+         WARN("Failed to update surface desc, hr %#x.\n", hr);
+         wined3d_mutex_unlock();
+         return hr_ddraw_from_wined3d(hr);

@@ -21,7 +21,7 @@ You download each of these yourself in the steps below, and then `make` compiles
 |---|---|
 | [QEMU](https://www.qemu.org/) 11.0.1, Windows only | Our patch adds `ivshmem-win`, the shared-memory card SharedGL needs and Windows's QEMU lacks. Linux uses the distribution's QEMU unchanged |
 | [SharedGL](https://github.com/roberttorok/sharedgl), the `windows-support` branch | It carries OpenGL calls from XP to your real GPU. This fork of [dmaivel's SharedGL](https://github.com/dmaivel/sharedgl) adds XP guests and Windows hosts, major speedups, and fixes for crashes, rendering bugs and missing OpenGL functions |
-| [wine9x](https://github.com/JHRobotics/wine9x) 1.7.55.45 | It turns Direct3D 8 and 9 into OpenGL, so Direct3D games can reach SharedGL |
+| [wine9x](https://github.com/JHRobotics/wine9x) 1.7.55.45, with our patch | It turns Direct3D 8 and 9 and DirectDraw into OpenGL, so Direct3D games can reach SharedGL. Our patch lets games fill mipmapped textures from their own memory. |
 | [cnc-ddraw](https://github.com/FunkyFr3sh/cnc-ddraw) 7.1.0.0 | It fixes the wrong colors in 16-bit DirectDraw games |
 | [QXL display driver](https://www.spice-space.org/download.html) 0.1-21 | It's the SPICE project's driver for QEMU's own paravirtual display card, it gives XP 32-bit color at high resolutions, and it's the card this whole setup was built and tuned on |
 
@@ -32,6 +32,7 @@ You download each of these yourself in the steps below, and then `make` compiles
 | `Makefile` | Compiles everything and builds the helper CD for XP, `guest.iso` |
 | `windows/run-xp.sh`, `linux/run-xp.sh` | Start the SharedGL server and the VM, with the tuned QEMU settings |
 | `windows/patches/qemu/qemu-all.patch` | QEMU's patch, for Windows hosts only |
+| `patches/wine9x/wine9x-all.patch` | wine9x's patch, for both hosts |
 | `guest/` | Batch files, settings and test programs for inside XP |
 
 ## Windows host
@@ -45,7 +46,7 @@ Turn on **Windows Hypervisor Platform** in Windows features and reboot, then ins
 Run everything below in the **UCRT64** terminal, from this folder. QEMU and the SharedGL server both build there.
 
 ```bash
-pacman -S --needed git make patch diffutils unzip xorriso \
+pacman -S --needed git make patch diffutils unzip xorriso nasm \
   mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-python \
   mingw-w64-ucrt-x86_64-glib2 mingw-w64-ucrt-x86_64-pixman mingw-w64-ucrt-x86_64-SDL2 mingw-w64-ucrt-x86_64-libepoxy \
   mingw-w64-ucrt-x86_64-spice mingw-w64-ucrt-x86_64-spice-protocol \
@@ -74,15 +75,16 @@ cd sharedgl && git checkout windows-support && cd ..
 
 ### 4. wine9x
 
-This is prebuilt, so just download it.
+Clone version 1.7.55.45 with the two libraries it includes, and apply our patch. `git` reports a "detached HEAD": that's expected for a fixed version.
 
 ```bash
-curl -L -o wine9x-1.7.55.45-sse3.zip https://github.com/JHRobotics/wine9x/releases/download/v1.7.55.45/wine9x-1.7.55.45-sse3.zip
+git clone https://github.com/JHRobotics/wine9x.git
+cd wine9x && git checkout v1.7.55.45 && git submodule update --init pthread9x nocrt && git apply ../patches/wine9x/wine9x-all.patch && cd ..
 ```
 
 ### 5. cnc-ddraw
 
-This is prebuilt too. Download it and its license.
+This is prebuilt, so just download it and its license.
 
 ```bash
 curl -L -o cnc-ddraw-v7.1.0.0.zip https://github.com/FunkyFr3sh/cnc-ddraw/releases/download/v7.1.0.0/cnc-ddraw.zip && curl -L -o cnc-ddraw-LICENSE https://raw.githubusercontent.com/FunkyFr3sh/cnc-ddraw/541b5de218ec3fbd6ea91e606ebfadc07c1786b0/LICENSE
@@ -114,7 +116,7 @@ On the host, `make` creates:
 | `qemu-11.0.1/build/qemu-img.exe` | Creates and converts disk images |
 | `sharedgl/build-win/sglrenderer.exe` | The SharedGL server, which draws on your GPU |
 | `guest.iso` | The helper CD for XP, described below |
-| `build-xp/`, `guest/cd/` | Intermediate files for `guest.iso`. You don't need them |
+| `build-xp/`, `guest/cd/`, the `.dll` files in `wine9x/` | Intermediate files for `guest.iso`. You don't need them |
 
 When you start the VM, the server writes its messages to `server.log`.
 
@@ -173,7 +175,7 @@ Now go to **Inside XP**.
 ### 1. Install the tools
 
 ```bash
-sudo apt install build-essential cmake git curl patch python3 mingw-w64 mingw-w64-tools \
+sudo apt install build-essential cmake git curl patch python3 mingw-w64 mingw-w64-tools nasm \
   libsdl2-dev libepoxy-dev genisoimage unzip qemu-system-x86 qemu-utils
 ```
 
@@ -190,8 +192,11 @@ cd sharedgl && git checkout windows-support && cd ..
 
 ### 3. wine9x
 
+Clone version 1.7.55.45 with the two libraries it includes, and apply our patch.
+
 ```bash
-curl -L -o wine9x-1.7.55.45-sse3.zip https://github.com/JHRobotics/wine9x/releases/download/v1.7.55.45/wine9x-1.7.55.45-sse3.zip
+git clone https://github.com/JHRobotics/wine9x.git
+cd wine9x && git checkout v1.7.55.45 && git submodule update --init pthread9x nocrt && git apply ../patches/wine9x/wine9x-all.patch && cd ..
 ```
 
 ### 4. cnc-ddraw
@@ -220,7 +225,7 @@ On the host, `make` creates:
 |---|---|
 | `sharedgl/build-host/sglrenderer` | The SharedGL server, which draws on your GPU |
 | `guest.iso` | The helper CD for XP, described in the Windows section's **Result** step |
-| `build-xp/`, `guest/cd/` | Intermediate files for `guest.iso`. You don't need them |
+| `build-xp/`, `guest/cd/`, the `.dll` files in `wine9x/` | Intermediate files for `guest.iso`. You don't need them |
 
 QEMU is your distribution's. When you start the VM, the server writes its messages to `server.log`.
 
@@ -312,6 +317,6 @@ The cached display memory needs the current `sgldrv.sys` in XP: after updating f
 
 ## License
 
-This repository's own files are under the MIT license in `LICENSE`. `windows/patches/qemu/qemu-all.patch` changes QEMU, so it's under QEMU's license, the GPL version 2. The components you download keep their own licenses.
+This repository's own files are under the MIT license in `LICENSE`. `windows/patches/qemu/qemu-all.patch` changes QEMU, so it's under QEMU's license, the GPL version 2. `patches/wine9x/wine9x-all.patch` changes wine9x, so it's under Wine's license, the LGPL version 2.1 or later. The components you download keep their own licenses.
 
 Not affiliated with or endorsed by the QEMU project or Microsoft. QEMU is a trademark of Fabrice Bellard. Windows and Windows XP are trademarks of Microsoft.
